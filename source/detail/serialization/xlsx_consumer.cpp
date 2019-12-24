@@ -1009,6 +1009,7 @@ void xlsx_consumer::read_worksheet_sheetdata()
             }
             case cell::type::empty:
             case cell::type::number:
+            case cell_type::date:
             {
                 ws_cell_impl->value_numeric_ = converter_.stold(cell.value);
                 break;

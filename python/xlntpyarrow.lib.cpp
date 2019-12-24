@@ -45,7 +45,7 @@ void import_pyarrow()
     }
 }
 
-arrow::ArrayBuilder *make_array_builder(arrow::Type::type type)
+std::unique_ptr<arrow::ArrayBuilder> make_array_builder(arrow::Type::type type)
 {
     auto pool = arrow::default_memory_pool();
     auto builder = static_cast<arrow::ArrayBuilder *>(nullptr);
@@ -134,32 +134,11 @@ arrow::ArrayBuilder *make_array_builder(arrow::Type::type type)
     case arrow::Type::BINARY:
         builder = new arrow::TypeTraits<arrow::BinaryType>::BuilderType(pool);
         break;
-/*
-    case arrow::Type::FIXED_SIZE_BINARY:
-        builder = new arrow::TypeTraits<arrow::FixedSizeBinaryType>::BuilderType(pool);
-        break;
-
-    case arrow::Type::LIST:
-        builder = new arrow::TypeTraits<arrow::ListType>::BuilderType(pool);
-        break;
-
-    case arrow::Type::STRUCT:
-        builder = new arrow::TypeTraits<arrow::StructType>::BuilderType(pool);
-        break;
-
-    case arrow::Type::UNION:
-        builder = new arrow::TypeTraits<arrow::UnionType>::BuilderType(pool);
-        break;
-
-    case arrow::Type::DICTIONARY:
-        builder = new arrow::TypeTraits<arrow::DictionaryType>::BuilderType(pool);
-        break;
-*/
     default:
         throw xlnt::exception("not implemented");
     }
 
-    return builder;
+    return std::unique_ptr<arrow::ArrayBuilder>(builder);
 }
 
 void open_file(xlnt::streaming_workbook_reader &reader, pybind11::object file)
@@ -186,7 +165,7 @@ std::uint16_t float_to_half(float f)
 
 void append_cell_value(arrow::ArrayBuilder *builder, arrow::Type::type type, xlnt::cell cell)
 {
-    const status = arrow::Status::OK();
+    auto status = arrow::Status::OK();
 
     switch (type)
     {
@@ -327,37 +306,22 @@ void append_cell_value(arrow::ArrayBuilder *builder, arrow::Type::type type, xln
         throw xlnt::exception("not implemented");
     }
 
-    if (status != arrow::Status::OK())
+    if (!status.ok())
     {
         throw xlnt::exception("Append failed");
     }
 }
 
-pybind11::handle read_batch(xlnt::streaming_workbook_reader &reader,
-    pybind11::object pyschema, int max_rows)
+arrow::Status process_batch(
+    xlnt::streaming_workbook_reader &reader,
+    size_t &rows_in_batch,
+    std::vector<std::unique_ptr<arrow::ArrayBuilder>> const& builders,
+    std::vector<arrow::Type::type> &column_types,
+    std::shared_ptr<arrow::Schema> &schema)
 {
-    import_pyarrow();
-
-    std::shared_ptr<arrow::Schema> schema;
-    arrow::py::unwrap_schema(pyschema.ptr(), &schema);
-
-    std::vector<arrow::Type::type> column_types;
-
-    for (auto i = 0; i < schema->num_fields(); ++i)
-    {
-        column_types.push_back(schema->field(i)->type()->id());
-    }
-
-    auto builders = std::vector<std::unique_ptr<arrow::ArrayBuilder>>();
-
-    for (auto type : column_types)
-    {
-        builders.emplace_back(make_array_builder(type));
-    }
-
     auto row = std::int64_t(0);
 
-    while (row < max_rows)
+    while (row < rows_in_batch)
     {
         if (!reader.has_cell()) break;
 
@@ -375,21 +339,92 @@ pybind11::handle read_batch(xlnt::streaming_workbook_reader &reader,
 
         ++row;
     }
+    
+    rows_in_batch = row;
+    
+    return arrow::Status::OK();
+}
 
-    auto columns = std::vector<std::shared_ptr<arrow::Array>>();
+arrow::Status fetch_all_native(xlnt::streaming_workbook_reader &reader, std::shared_ptr<arrow::Schema> &schema, std::shared_ptr<arrow::Table> *out, bool single_batch)
+{
+    std::vector<arrow::Type::type> column_types;
+
+    for (auto i = 0; i < schema->num_fields(); ++i)
+    {
+        column_types.push_back(schema->field(i)->type()->id());
+    }
+
+    auto builders = std::vector<std::unique_ptr<arrow::ArrayBuilder>>();
+
+    for (auto type : column_types)
+    {
+        builders.emplace_back(make_array_builder(type));
+    }
+
+    auto rows_in_batch = std::size_t(100);
+
+    if (single_batch) {
+        ARROW_RETURN_NOT_OK(process_batch(reader, rows_in_batch, builders, column_types, schema));
+    } else {
+        do {
+            ARROW_RETURN_NOT_OK(process_batch(reader, rows_in_batch, builders, column_types, schema));
+        } while (rows_in_batch != 0);
+    }
+
+    std::vector<std::shared_ptr<arrow::Array>> arrow_arrays;
+    std::vector<std::shared_ptr<arrow::Field>> fields;
+    auto arrays = std::vector<std::shared_ptr<arrow::Array>>();
 
     for (auto &builder : builders)
     {
-        std::shared_ptr<arrow::Array> column;
-        builder->Finish(&column);
-        columns.emplace_back(column);
+        std::shared_ptr<arrow::Array> array;
+        ARROW_RETURN_NOT_OK(builder->Finish(&array));
+        arrays.emplace_back(array);
     }
 
-    auto batch_pointer = std::make_shared<arrow::RecordBatch>(schema, row, columns);
-    auto batch_object = arrow::py::wrap_record_batch(batch_pointer);
-    auto batch_handle = pybind11::handle(batch_object); // don't need to incr. reference count, right?
+    *out = arrow::Table::Make(schema, arrays);
 
-    return batch_handle;
+    return arrow::Status::OK();
+}
+
+pybind11::object read_batch(xlnt::streaming_workbook_reader &reader, pybind11::object pyschema, int max_rows)
+{
+    std::shared_ptr<arrow::Schema> schema;
+    if (!arrow::py::unwrap_schema(pyschema.ptr(), &schema).ok())
+    {
+        throw xlnt::exception("Reading Arrow schema set failed.");
+    }
+    
+    std::shared_ptr<arrow::Table> table;
+    {
+        pybind11::gil_scoped_release release;
+        if (!fetch_all_native(reader, schema, &table, true).ok())
+        {
+            throw xlnt::exception("Fetching Arrow result set failed.");
+        }
+    }
+    arrow::py::import_pyarrow();
+    return pybind11::reinterpret_steal<pybind11::object>(pybind11::handle(arrow::py::wrap_table(table)));
+}
+
+pybind11::object read_all(xlnt::streaming_workbook_reader &reader, pybind11::object pyschema)
+{
+    std::shared_ptr<arrow::Schema> schema;
+    if (!arrow::py::unwrap_schema(pyschema.ptr(), &schema).ok())
+    {
+        throw xlnt::exception("Reading Arrow schema set failed.");
+    }
+
+    std::shared_ptr<arrow::Table> table;
+    {
+        pybind11::gil_scoped_release release;
+        if (!fetch_all_native(reader, schema, &table, false).ok())
+        {
+            throw xlnt::exception("Fetching Arrow result set failed.");
+        }
+    }
+    arrow::py::import_pyarrow();
+    return pybind11::reinterpret_steal<pybind11::object>(pybind11::handle(arrow::py::wrap_table(table)));
 }
 
 PYBIND11_MODULE(lib, m)
@@ -405,7 +440,8 @@ PYBIND11_MODULE(lib, m)
         .def("end_worksheet", &xlnt::streaming_workbook_reader::end_worksheet)
         .def("sheet_titles", &xlnt::streaming_workbook_reader::sheet_titles)
         .def("open", &open_file)
-        .def("read_batch", &read_batch);
+        .def("read_batch", &read_batch)
+        .def("read", &read_all);
 
     pybind11::class_<xlnt::worksheet>(m, "Worksheet");
 
