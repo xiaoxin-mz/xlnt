@@ -77,6 +77,7 @@ class build_ext(_build_ext):
 
         cmake_options = [
             '-DPYTHON_EXECUTABLE=%s' % sys.executable,
+            '-DXLNT_CXX_LANG=%d' % 11,
             static_lib_option,
         ]
 
@@ -188,11 +189,10 @@ class build_ext(_build_ext):
     def get_ext_built(self, name):
         if sys.platform == 'win32':
             head, tail = os.path.split(name)
-            suffix = sysconfig.get_config_var('SO')
+            suffix = sysconfig.get_config_var('EXT_SUFFIX')
             return pjoin(head, self.build_type, tail + suffix)
         else:
-            suffix = sysconfig.get_config_var('SO')
-            print('suffix is', suffix)
+            suffix = sysconfig.get_config_var('EXT_SUFFIX')
             return name + suffix
 
     def get_names(self):
@@ -235,13 +235,13 @@ class BinaryDistribution(Distribution):
 
 setup(
     name = 'xlntpyarrow',
-    version = '1.1.0',
+    version = '1.4.0',
     description = 'Python library for converting Apache Arrow tables<->XLSX files',
     long_description = long_description,
     author = 'Thomas Fussell',
-    author_email = 'thomas.fussell@gmail.com',
+    author_email = 'thomas@fussell.io',
     maintainer = 'Thomas Fussell',
-    maintainer_email = 'thomas.fussell@gmail.com',
+    maintainer_email = 'thomas@fussell.io',
     url = 'https://github.com/tfussell/xlnt',
     download_url = 'https://github.com/tfussell/xlnt/releases',
     packages = ['xlntpyarrow'],

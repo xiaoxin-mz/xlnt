@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.2)
 project(xlntpyarrow)
 
+set(CMAKE_CXX_STANDARD ${XLNT_CXX_LANG})
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CXX_EXTENSIONS OFF)
+
 if(NOT COMBINED_PROJECT)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../source ${CMAKE_CURRENT_BINARY_DIR}/source)
 endif()

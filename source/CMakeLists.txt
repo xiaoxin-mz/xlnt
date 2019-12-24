@@ -7,7 +7,7 @@ set(CXX_EXTENSIONS OFF)
 
 # Project metadata
 set(PROJECT_VENDOR "Thomas Fussell")
-set(PROJECT_CONTACT "thomas.fussell@gmail.com")
+set(PROJECT_CONTACT "thomas@fussell.io")
 set(PROJECT_URL "https://github.com/tfussell/xlnt")
 set(PROJECT_DESCRIPTION "cross-platform user-friendly xlsx library for C++11")
 
