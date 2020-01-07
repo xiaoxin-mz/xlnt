@@ -172,6 +172,13 @@ public:
             res ^= std::hash<std::string>()(r.first);
         }
 
+        for (auto r : k.phonetic_runs())
+        {
+            auto encoded = r.text + " " + std::to_string(r.start) + " "
+                + std::to_string(r.end) + " " + (r.preserve_space ? "preserve" : "");
+            res ^= std::hash<std::string>()(encoded);
+        }
+
         return res;
     }
 };
