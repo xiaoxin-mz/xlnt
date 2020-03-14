@@ -165,21 +165,55 @@ class XLNT_API rich_text_hash
 public:
     std::size_t operator()(const rich_text &k) const
     {
-        std::size_t res = 0;
+        auto encoded = k.plain_text();
 
         for (auto r : k.runs())
         {
-            res ^= std::hash<std::string>()(r.first);
+            encoded.append("%%");
+            encoded.append(r.first);
+            encoded.append("%%");
+            encoded.append(r.preserve_space ? "preserve" : "nopreserve");
+            encoded.append("%%");
+            if (r.second.is_set())
+            {
+                auto f = r.second.get();
+                encoded.append("%%");
+                encoded.append(f.bold() ? "bold" : "normal");
+                encoded.append("%%");
+                encoded.append(std::to_string(f.charset()));
+                encoded.append("%%");
+                encoded.append(f.color().rgb().hex_string());
+                encoded.append("%%");
+                encoded.append(std::to_string(f.family()));
+                encoded.append("%%");
+                encoded.append(f.italic() ? "italic" : "normal");
+                encoded.append("%%");
+                encoded.append(f.name());
+                encoded.append("%%");
+                encoded.append(f.outline() ? "outline" : "normal");
+                encoded.append("%%");
+            }
+            else
+            {
+                encoded.append("-");
+            }
+            encoded.append("%%");
         }
 
         for (auto r : k.phonetic_runs())
         {
-            auto encoded = r.text + " " + std::to_string(r.start) + " "
-                + std::to_string(r.end) + " " + (r.preserve_space ? "preserve" : "");
-            res ^= std::hash<std::string>()(encoded);
+            encoded.append(r.text + "%%");
+            encoded.append(std::to_string(r.start) + "%%");
+            encoded.append(std::to_string(r.end) + "%%");
+            encoded.append(r.preserve_space ? "preserve" : "");
+        }
+        
+        if (k.has_phonetic_properties())
+        {
+            encoded.append(std::to_string(k.phonetic_properties().font_id()));
         }
 
-        return res;
+        return std::hash<std::string>()(encoded);
     }
 };
 

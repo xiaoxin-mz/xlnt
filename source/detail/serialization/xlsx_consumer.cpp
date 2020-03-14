@@ -2138,15 +2138,17 @@ void xlsx_consumer::read_shared_string_table()
     {
         expect_start_element(qn("spreadsheetml", "si"), xml::content::complex);
         auto rt = read_rich_text(qn("spreadsheetml", "si"));
-        target_.add_shared_string(rt);
+        target_.add_shared_string(rt, true);
         expect_end_element(qn("spreadsheetml", "si"));
     }
 
     expect_end_element(qn("spreadsheetml", "sst"));
 
-    if (has_unique_count && unique_count != target_.shared_strings().size())
+    auto actual_count = target_.shared_strings_by_id().size();
+    if (has_unique_count && unique_count != actual_count)
     {
-        throw invalid_file("sizes don't match");
+        throw invalid_file("unique shared string count doesn't match, expected "
+            + std::to_string(unique_count) + " found " + std::to_string(actual_count));
     }
 }
 
