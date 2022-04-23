@@ -67,6 +67,7 @@ rich_text::rich_text(const rich_text_run &single_run)
 void rich_text::clear()
 {
     runs_.clear();
+    unique_index = 0;
     phonetic_runs_.clear();
     phonetic_properties_.clear();
 }
@@ -151,7 +152,7 @@ bool rich_text::operator==(const rich_text &rhs) const
 
     if (phonetic_properties_ != rhs.phonetic_properties_) return false;
 
-    return true;
+    return  unique_index == rhs.unique_index;
 }
 
 bool rich_text::operator==(const std::string &rhs) const
